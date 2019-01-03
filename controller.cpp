@@ -13,7 +13,7 @@
 #include <arpa/inet.h>
 #include <netdb.h>
 
-#define MYPORT "8888"    // the port users will be connecting to
+#define MYPORT "8888" // the port users will be connecting to
 
 #define MAXBUFLEN 24
 
