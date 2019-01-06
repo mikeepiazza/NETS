@@ -13,7 +13,7 @@
 #include <arpa/inet.h>
 #include <netdb.h>
 
-#define MYPORT "8888" // the port users will be connecting to
+#define MYPORT "8888"    // the port users will be connecting to
 
 #define MAXBUFLEN 24
 
@@ -88,7 +88,11 @@ int main(void)
 	printf("server: got packet from %s\n", inet_ntop(their_addr.ss_family, get_in_addr((struct sockaddr*) &their_addr), s, sizeof s));
 	printf("server: packet is %d bytes long\n", numbytes);
 	buf[numbytes] = '\0';
-	printf("server: packet contains \"%s\"\n", buf);
+	printf("server: packet contains: 0x");
+	for (int i = 0; i < numbytes; i++) {
+		printf("%02x", (unsigned char)buf[i]);
+	}
+	printf("\n");
 
 	// TX
 	if ((numbytes = sendto(sockfd, &msg, strlen(msg), 0, (struct sockaddr*) &their_addr, addr_len)) == -1) {
