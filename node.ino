@@ -16,7 +16,7 @@ char txBuffer[UDP_TX_PACKET_MAX_SIZE]; // transmit buffer = 24B
 
 // typedefs for readability
 typedef enum {STRAY_i, FIRED_i, LOWCURRENTSTATUS_i, HIGHCURRENTCOMMAND_i, NULLCOMMAND_i, NULLSTATUS_i} indicators_i; // indicators
-typedef enum {CHANNEL_c, CURRENTMODE_c, STRAYMODE_c, RESET_c, DATARATE_c} cmdpackets_c; // command packets
+typedef enum {CHANNEL_c, CURRENTMODE_c, STRAYMODE_c, RESET_c, DATARATE_c, SERVERUPDATE_c, ACK_c} cmdpackets_c; // command packets, list must match controller
 typedef enum {CHANNELID_t, CURRENTHIGH_t, CURRENTLOW_t, CURRENTRATE_t, INDICATORS_t, INDICATORRATE_t, TEMPERATURE_t} telemetry_t; // telemetry types
 
 class Node { // holds state of node
@@ -32,7 +32,7 @@ public:
   void setLastCurrentTime(const unsigned long& last); // set last current sample time
   void setLastIndicatorTime(const unsigned long& last); // set last indicator sample time
   byte* getTelemetry() const; // return pointer to telemetry (byte-array)
-  size_t getSize() const; // returns size of telemetry
+  size_t getTelemetrySize() const; // returns size of telemetry
   byte getChannelID() const; // returns channel id
   byte getCurrentRate() const; // returns current rate
   byte getIndicatorRate() const; // returns indicator rate
@@ -93,7 +93,7 @@ byte* Node::getTelemetry() const { // get pointer to first byte of telmetry arra
   return telemetry;
 }
 
-size_t Node::getSize() const { // get size of telemetry
+size_t Node::getTelemetrySize() const { // get size of telemetry
   return sizeof(telemetry);
 }
 
@@ -125,7 +125,6 @@ void bufferCheck() { // check for new UDP payload
     Serial.println(packetSize);
     
     Serial.print("From: ");
-    IPAddress remoteIP = Udp.remoteIP(); // update remote IP address
     for (int i=0; i < 4; i++) {
       Serial.print(remoteIP[i], DEC);
       if (i < 3) {
@@ -138,41 +137,43 @@ void bufferCheck() { // check for new UDP payload
 
     Udp.read(rxBuffer, UDP_TX_PACKET_MAX_SIZE); // read the packet into packetBufffer
     Serial.print("Contents: ");
-    for (int i = 0; i < UDP_TX_PACKET_MAX_SIZE; i++) { Serial.println(rxBuffer[i], BIN); } // print contents (in binary)
+    for (int i = 0; i < UDP_TX_PACKET_MAX_SIZE; i++) { Serial.print(rxBuffer[i], HEX); } // print contents (in hex)
+    Serial.println("");
 
     // check for command packets
-    if (rxBuffer[1] == CHANNEL_c) {
-      data.setChannelID(rxBuffer[2]); // update channel ID
+    if (rxBuffer[0] == CHANNEL_c) {
+      data.setChannelID(rxBuffer[1]); // update channel ID
     }
-    else if (rxBuffer[1] == CURRENTMODE_c) {
-      if (rxBuffer[2] == 0x00) { // 0 means LOW current mode commanded
+    else if (rxBuffer[0] == CURRENTMODE_c) {
+      if (rxBuffer[1] == 0x00) { // 0 means LOW current mode commanded
         data.setIndicatorValue(HIGHCURRENTCOMMAND_i, 0); // set indicator to 0
         // send a digital out to hardware!!!
       }
-      else if (rxBuffer[2] == 0x01) { // 1 means HIGH current mode commanded
+      else if (rxBuffer[1] == 0x01) { // 1 means HIGH current mode commanded
         data.setIndicatorValue(HIGHCURRENTCOMMAND_i, 1); // set indicator to 1
         // send a digital out to hardware!!!
       }
     }
-    else if (rxBuffer[1] == STRAYMODE_c) {
+    else if (rxBuffer[0] == STRAYMODE_c) {
       // 0 for power-off (switch null resistor out of circuit)
       // 1 for power-on (switch null resistor into circuit)
       data.setIndicatorValue(NULLCOMMAND_i, rxBuffer[2]); // update null command
       // send a digital out to hardware!!!
     }
-    else if (rxBuffer[1] == RESET_c) {
+    else if (rxBuffer[0] == RESET_c) {
       data.setCurrentRate(NULL); // reset current rate to OFF
       // need to confirm the wording in SDR!!! interpreted as current measurements only... keep reporting indicators at low data rate???
     }
-    else if (rxBuffer[1] == DATARATE_c) {
-      data.setCurrentRate(rxBuffer[2]); // update current rate
-      data.setIndicatorRate(rxBuffer[3]); // update indicator rate
+    else if (rxBuffer[0] == DATARATE_c) {
+      data.setCurrentRate(rxBuffer[1]); // update current rate
+      data.setIndicatorRate(rxBuffer[2]); // update indicator rate
     }
 
     // send a reply to the IP address and port that sent us the packet we received
-    Udp.beginPacket(Udp.remoteIP(), Udp.remotePort());
-    Udp.write("ACK"); // ack message
-    Udp.write(rxBuffer[1]); // type of command ack'd
+    Udp.beginPacket(Udp.remoteIP(), Udp.remotePort()); // destination
+    Udp.write(data.getChannelID()); // tx channel id
+    Udp.write(ACK_c); // ack message
+    Udp.write(rxBuffer[0]); // type of command ack'd
     Udp.endPacket();
   }
 }
@@ -201,7 +202,7 @@ void setup() {
 
   Udp.begin(localPort); // start UDP
 
-  delay(3000); // give dhcp server time to respond
+  delay(1000); // give dhcp server time to respond
 
   Serial.println(Ethernet.localIP()); // print ip address
 
@@ -210,7 +211,8 @@ void setup() {
   while (data.getChannelID() == NULL) { // loop until channel acquired
     // send MAC to controller
     Udp.beginPacket(remoteIP, remotePort);
-    Udp.write(txBuffer, 6); // MAC address is 6 bytes long
+    Udp.write(CHANNEL_c); // request channel command
+    Udp.write(macAddress, 6); // 6-byte MAC address
     Udp.endPacket();
     Serial.println("Initial contact sent!");
     
@@ -223,27 +225,30 @@ void setup() {
 void sendSample() {
   unsigned long time = micros(); // update current time
 
-  if (time - data.getLastIndicatorTime() > 1000000 / data.getIndicatorRate()) { // send indicator sample?
+  if (data.getIndicatorRate() && time - data.getLastIndicatorTime() > 1000000 / data.getIndicatorRate()) { // send indicator sample?
     data.updateIndicators(); // refresh indicators
     Udp.beginPacket(Udp.remoteIP(), Udp.remotePort());
-    Udp.write(data.getTelemetry(), data.getSize()); // send full telemetry
+    Udp.write(data.getChannelID()); // tx channel id
+    Udp.write(data.getTelemetry(), data.getTelemetrySize()); // send full telemetry
     Udp.endPacket();
-    data.setLastIndicatorTime(time);
+    data.setLastIndicatorTime(time); // update time tx
+    data.setLastCurrentTime(time); // current also sent with telemetry
   }
-  else if (time - data.getLastCurrentTime() > 1000000 / data.getCurrentRate()) { // send current sample?
+  else if (data.getCurrentRate() && time - data.getLastCurrentTime() > 1000000 / data.getCurrentRate()) { // send current sample?
     unsigned int currentMeasurement = analogRead(A0); // new sample from ADC
     data.setCurrentMeasurement(currentMeasurement); // store new sample
     Udp.beginPacket(Udp.remoteIP(), Udp.remotePort());
     Udp.write(data.getTelemetry(), 3); // only send channel and current (the first 3 bytes of telemetry)
     Udp.endPacket();
-    data.setLastCurrentTime(time);
+    data.setLastCurrentTime(time); // update time tx
   }
 }
 
 void loop() {
   bufferCheck(); // check for new datagram
   sendSample(); // update and transmit new samples
-  
+  Serial.println("Loop");
+  delay(10000);
   //time = micros() - time; // elapsed time
   //Serial.print("Packet rate: ");
   
