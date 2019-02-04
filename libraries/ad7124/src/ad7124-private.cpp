@@ -182,7 +182,7 @@ Ad7124Private::readRegister (Ad7124Register* pReg) {
 
   if (pReg->addr != AD7124_ERR_REG && isReady) {
 
-    ret = waitForSpiReady (responseTimeout); //This slows things way down
+    ret = waitForSpiReady (responseTimeout);
     if (ret < 0) {
 
       return ret;
@@ -427,7 +427,7 @@ Ad7124Private::init (int slave_select, Ad7124Register * regs) {
   reg = regs;
 
   /* Initialize the SPI communication. */
-  ret = drv.init (slave_select, false, 16000000, 1, 0); 
+  ret = drv.init (slave_select, false, 48000000, 1, 0);
   if (ret == false) {
     return AD7124_SPI_ERR;
   }
@@ -523,7 +523,7 @@ const Ad7124Register Ad7124Register::DefaultRegs[] PROGMEM = {
   {0x04, 0x0000, 2, 1}, /* IOCon2 */
   {0x05, 0x02,   1, 2}, /* ID */
   {0x06, 0x0000, 3, 2}, /* Error */
-  {0x07, 0x0000, 3, 1}, /* Error_En */
+  {0x07, 0x0044, 3, 1}, /* Error_En */
   {0x08, 0x00,   1, 2}, /* Mclk_Count */
   {0x09, 0x8001, 2, 1}, /* Channel_0 */
   {0x0A, 0x0001, 2, 1}, /* Channel_1 */
